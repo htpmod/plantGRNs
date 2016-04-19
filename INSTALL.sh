@@ -9,7 +9,7 @@ set -x
 cd $BINDIR
 echo "Installing FastQC ..."
 wget -q http://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v0.11.5.zip -O fastqc_v0.11.5.zip
-unzip -f fastqc_v0.11.5.zip && rm fastqc_v0.11.5.zip
+unzip -o fastqc_v0.11.5.zip && rm fastqc_v0.11.5.zip
 chmod +x FastQC/fastqc
 set +x
 
@@ -19,7 +19,7 @@ set -x
 cd $BINDIR
 echo "Installing picard ..."
 wget -q https://github.com/broadinstitute/picard/releases/download/2.2.1/picard-tools-2.2.1.zip -O picard-tools-2.2.1.zip 
-unzip -f picard-tools-2.2.1.zip && mv picard-tools-2.2.1 picard && rm picard-tools-2.2.1.zip
+unzip -o picard-tools-2.2.1.zip && mv picard-tools-2.2.1 picard && rm picard-tools-2.2.1.zip
 set +x
 
 
