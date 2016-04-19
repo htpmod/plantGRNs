@@ -75,8 +75,8 @@ set -x
 cd $BINDIR
 echo "Installing UCSC toolkits ..."
 ## choose x86_64 platform here 
-wget -q http://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/bedGraphToBigWig 
-wget -q http://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/bedToBigBed 
+wget -q http://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/bedGraphToBigWig -O bedGraphToBigWig 
+wget -q http://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/bedToBigBed -O bedToBigBed 
 chmod +x bedGraphToBigWig bedToBigBed 
 set +x
 
