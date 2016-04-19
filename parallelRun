@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+
+usage(){
+cat <<EOF
+Usage:  `basename $0` [options]
+         Run jobs in parallel in bsub/qsub on clusters (queue mode), OR 
+         on a single computer with multiple threads (multiple-threading mode)
+Default: wait until all the jobs finish 
+
+Options (defaults in brackets):
+       -h, --help                   print this usage message and quit
+       -l, --list <file>            a file with a list of commands 
+                                    if not provided, it will read from stdin. 
+       -w, --workers <number>       number of workers in parallelization [10]
+EOF
+}
+
+ARGS=`getopt -o "hl:w:" --long "help,list:workers:" -- "$@"`
+eval set -- "$ARGS"
+
+LIST=
+WORKERS=10
+while true ; do
+    case $1 in
+    -h|--help) usage; exit;;
+    -l|--list) LIST=$2; shift 2;;
+    -w|--workers) WORKERS=$2; shift 2;;
+    --) shift; break;;
+    *) >&2 echo "$0: internal error!"; exit 1 ;;
+    esac 
+done
+
+## no input data 
+if [[ $# -lt 0 ]]; then
+    usage; exit 1;
+fi
+if [[ -n $LIST && ! -f $LIST ]]; then
+    >&2 echo "Input file '$LIST' doesn't exist";
+    exit 1;
+fi
+
+command -v Rscript >/dev/null 2>&1 || {
+    >&2 echo "R/Rscript is not included in the \$PATH. Aborting. ";
+    exit 1;
+}
+tmpfile=$(mktemp)
+while read -r CMD; do
+    if [[ ! -z "${CMD// }" ]]; then
+        echo $CMD
+    fi
+done < "${LIST:-/dev/stdin}" >> $tmpfile
+
+>&2 echo ""
+
+Rscript - <<EOS
+    getwd()
+    if(!suppressMessages(require(BiocParallel,quietly=T,warn.conflicts=F))) {
+        source("http://bioconductor.org/biocLite.R")
+        biocLite("BiocParallel", ask=FALSE)
+        library(BiocParallel)
+    }
+    jobs <- readLines(file("$tmpfile"))
+    ## writeLines(jobs)
+    multicoreParam <- MulticoreParam(workers=$WORKERS) ## , jobname="$JOBNAME"
+    run <- function(cmd) {
+        message("Running: ", cmd)
+        system(cmd)
+    }
+    system.time(result <- bplapply(jobs, run, BPPARAM=multicoreParam))
+    writeLines(paste(c("[FAIL]", "[ OK ]")[(result==0)+1], jobs, collapse="\n", sep=": "))
+EOS
+rm $tmpfile
+>&2 echo "Done." 
