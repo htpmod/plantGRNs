@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+
+###############################
+## Function                  ##
+###############################
+## renders a given message in a specific color 
+## print an info message [in green] to stderr/stdout
+function pinf {
+    now=$(date +"%Y-%m-%d %I:%M:%S")
+    ## echo "[$now] $*"; 
+    echo -e "\033[32;38m[$now] $*\033[0m" 1>&2;
+}
+## print a warning message [in yellow] to stderr
+function pwarn { 
+    now=$(date +"%Y-%m-%d %I:%M:%S")
+    echo -e "\033[33;38m[$now] $*\033[0m" 1>&2;
+}
+## print an error message [in red] to stderr
+function perr {
+    now=$(date +"%Y-%m-%d %I:%M:%S")
+    echo -e "\033[91;38m[$now] ERROR: $*\033[0m" 1>&2;
+}
+
+function chkcmd {
+    cmds=("$@")
+    for cmd in "${cmds[@]}" ; do
+        command -v "$cmd" >/dev/null 2>&1 || {
+            perr "$cmd is not included in the \$PATH. Aborting. " ;
+            exit 1;
+        }
+    done
+}
+
+usage(){
+cat <<EOF
+Usage: `basename $0` [options]
+Peak annotation
+
+Options (defaults in brackets):
+   -h, --help                   print this usage message and quit
+   -l, --list <file>            a file with a list of samples, in the format of 
+                                (arbitrary_name peakset1:bed1 peakset2:bed2 ...).  
+                                if not provided, it will read from stdin. 
+   -i, --indir <dir>            directory with bed files
+   -o, --outdir <dir>           directory where output files will be written
+   -g, --gtf <file>             annotation file with gtf format 
+   -r                           overwrite output files [default: off]
+EOF
+}
+
+## path of this shell script
+CODEDIR=$(readlink -f $(dirname $0))
+upstream=3000
+downstream=3000
+
+ARGS=`getopt -o "hl:i:o:g:r" --long "help,list:,indir:,gtf:,outdir:" -- "$@"`
+eval set -- "$ARGS"
+
+REPLACE=0
+INDIR=
+OUTDIR=
+LIST=
+GTF=
+while true ; do
+    case $1 in
+    -h|--help) usage; exit;;
+    -l|--list) LIST=$2; shift 2;;
+    -i|--indir) INDIR=$2; shift 2;;
+    -o|--outdir) OUTDIR=$2; shift 2;;
+    -g|--gtf) GTF=$2; shift 2;;
+    -r) REPLACE=1; shift;;
+    --) shift; break;;
+    *) perr "$0: internal error!"; exit 1 ;;
+    esac 
+done
+
+## not-supported parameter? 
+if [[ $# -ne 0 ]]; then
+    usage; exit 1;
+fi
+
+## check required parameters
+if [[ -z $OUTDIR || -z $INDIR || -z $GTF ]]; then
+    usage; exit 1;
+fi
+
+# LOAD_MODULE="module load bedtools >/dev/null 2>&1"
+LOAD_MODULE=$(loadmodule bedtools) 
+eval $LOAD_MODULE
+
+## check the availability of required software
+chkcmd bedtools
+
+## check input data
+if [[ -n $LIST && ! -f $LIST ]]; then
+    perr "Input file '$LIST' doesn't exist";
+    exit 1;
+fi
+
+## check input DIR
+if [[ ! -d $INDIR ]]; then
+    perr "$INDIR - indir doesn't exist";
+    exit 1;
+fi
+INDIR=$(readlink -f ${INDIR})
+if [[ ! -f $GTF ]]; then
+    perr "$GTF - gtf file doesn't exist";
+    exit 1;
+fi
+GTF=$(readlink -f ${GTF})
+
+if [[ ! -d $OUTDIR ]]; then
+    mkdir -p $OUTDIR
+fi
+OUTDIR=$(readlink -f ${OUTDIR})
+pinf "Output DIR of results: $OUTDIR";
+
+## start of the analysis steps ## 
+pinf "Starting peak annotation ..." ;
+## read from a list file or stdin 
+
+while read -r sample more; do
+    outpref="${OUTDIR}/${sample}"
+    if [[ $REPLACE -eq 1 || ! -f "${outpref}.figures.pdf" ]]; then
+        pinf "******************* ${sample} *******************\n"
+        mkdir -p ${outpref} ${outpref}-figs
+        sample=$(basename $sample)
+        read -r -a arr <<< "${more}"
+        ## arr=( ${more} )
+        num=0
+        peaksets=
+        for bed in "${arr[@]}"; do 
+            pinf "check ${bed} ... "
+            bedfile=${INDIR}"/"$(basename $bed | awk -vFS=":" '{if($2){print $2}else{print $1}}')
+            if [[ -f "${bedfile}" && -s "${bedfile}" ]]; then 
+                if [[ -z ${peaksets} ]]; then 
+                    peaksets=$(basename $bed | awk -vFS=":" '{print $1}' | sed -e 's/;/_/')
+                else 
+                    peaksets=${peaksets}";"$(basename $bed | awk -vFS=":" '{print $1}' | sed -e 's/;/_/')
+                fi
+                ## bedfiles[$num]=${bedfile}
+                num=$(($num+1))
+                cut -f1-5 ${bedfile} > ${outpref}/$num.bed
+            else 
+                pwarn "Bed file ${bedfile} for ${sample} doesn't exist or is empty. ";
+                pwarn "Skipping bed file ${bedfile} ... "
+                continue;
+            fi 
+        done 
+        
+        if [[ $num -lt 1 ]]; then 
+            pwarn "No valid bed file was found. Skipping ${sample} ... ";
+            rm -rf ${outpref}
+            continue;
+        fi 
+        
+        ## using R to process 
+        Rscript - <<EOS
+setwd('$outpref')
+sink('${outpref}.log.txt')
+source('${CODEDIR}/common.R')
+### loading packages
+ris(c('ggplot2'))
+bis(c('ChIPseeker', 'GenomicFeatures'))
+
+num <- ${num}
+peaksets <- unlist(strsplit("${peaksets}", ";"))
+bedset <- 1:num
+cat("Bed files: ", bedset, "\n")
+cat("Peak peaksets: ", peaksets, "\n")
+txdb <- makeTxDbFromGFF('${GTF}', dataSource="db")
+## saveDb(txdb, file="${outpref}/db.sqlite")
+## txdb <- loadDb("${outpref}/db.sqlite")
+promoter <- getPromoters(TxDb=txdb, upstream=${upstream}, downstream=${downstream}) 
+
+peakfiles <- paste0("${outpref}/", bedset, ".bed")
+bedlist <- as.list(peakfiles)
+names(bedlist) <- peaksets 
+tagMatrixList <- peakAnnoList <- list()
+
+for(i in bedset){
+    peakset <- peaksets[i] 
+    cat("************", peakset, "************\n") 
+    pdf(paste0("${outpref}-", peakset, "-0.pdf"), width=8.27, heigh=8.27, pointsize=10) 
+    plot(1, type="n", axes=FALSE, frame=FALSE, xlab=NA, ylab=NA)
+    text(1, paste0("Figures for ", peakset), cex=3, col=2)
+    dev.out <- dev.off() 
+    
+    peakfile <- paste0("${outpref}/", i, ".bed") 
+    peakdat <- readPeakFile(peakfile) 
+    
+    ### ChIP peaks coverage plot 
+    
+    ## covplot(peakdat, weightCol="V5") 
+    ## ggsave(paste0("${outpref}-", peakset, "-coverage.pdf"), width=8.27, height=8.27, pointsize=10)
+    ## dev.out <- dev.off()
+    
+    ### Heatmap of ChIP binding to TSS regions 
+    tagMatrix <- getTagMatrix(peakdat, windows=promoter) 
+    tagMatrixList[[i]] <- tagMatrix 
+    pdf(paste0("${outpref}-", peakset, "-1-heatmap-tss.pdf"), width=3, heigh=8.27, pointsize=10) 
+    ## tagMatrix <- peakHeatmap(peakfile, TxDb=txdb, upstream=${upstream}, downstream=${downstream}, color="red") 
+    tagHeatmap(tagMatrix, xlim=c(-${upstream}, ${downstream}), color="red") 
+    dev.out <- dev.off() 
+    
+    ## Average Profile of ChIP peaks binding to TSS region 
+    plotAvgProf(tagMatrix, xlim=c(-${upstream}, ${downstream}), xlab="Genomic region (5'->3')", ylab = "Peak frequency") ## , conf=0.95, resample=100 
+    ggsave(paste0("${outpref}-", peakset, "-2-profile-tss.pdf"), width=8.27, height=8.27, pointsize=10)
+    # dev.out <- dev.off()
+    
+    ## the same as above 
+    # plotAvgProf2(peakfile, TxDb=txdb, upstream=${upstream}, downstream=${downstream}, xlab="Genomic region (5'->3')", ylab = "Peak frequency") 
+    
+    ## Peak annotation: annotate the location of a given peak in terms of genomic features 
+    peakanno <- annotatePeak(peakfile, tssRegion=c(-${upstream}, ${downstream}), TxDb=txdb) 
+    peakAnnoList[[i]] <- peakanno 
+    
+    pdf(paste0("${outpref}-", peakset, "-3-feature-pie.pdf"), width=8.27, height=8.27, pointsize=10) 
+    ## pie chart 
+    plotAnnoPie(peakanno) 
+    ## vennpie chart 
+    vennpie(peakanno) 
+    dev.out <- dev.off() 
+    
+    ## bar chart 
+    plotAnnoBar(peakanno) 
+    ggsave(paste0("${outpref}-", peakset, "-4-feature-bar.pdf"), width=8.27, height=3, pointsize=10)
+    # dev.out <- dev.off() 
+    
+    pdf(paste0("${outpref}-", peakset, "-5-feature-upset.pdf"), width=8.27, height=5, pointsize=10) 
+    ## upsetplot(peakanno) 
+    upsetplot(peakanno, vennpie=TRUE) 
+    dev.out <- dev.off() 
+    
+    ## Visualize distribution of TF-binding loci relative to TSS 
+    plotDistToTSS(peakanno, title="Distribution of transcription factor-binding loci relative to TSS") 
+    ggsave(paste0("${outpref}-", peakset, "-6-dist-tss.pdf"), width=8.27, height=3, pointsize=10)
+    # dev.out <- dev.off() 
+    
+    write.table(as.data.frame(peakanno), paste0("${outpref}-", peakset, "-table.txt"), sep="\t", row.names=FALSE, quote=FALSE, na="") 
+}
+
+# if(!suppressMessages(require(BiocParallel))) {source("http://bioconductor.org/biocLite.R"); biocLite("BiocParallel");library(BiocParallel)}
+## Parallel annotation  
+## multicoreParam <- MulticoreParam(workers=10) 
+## system.time(result <- bpvec(bedset, run, BPPARAM=multicoreParam))
+
+if(num > 1){
+    names(tagMatrixList) <- peaksets
+    names(peakAnnoList) <- peaksets
+    
+    mxh <- 2.5*num
+    mxw <- 3*num
+    if(mxh > 40){
+        mxh <- 40
+    }
+    if(mxw > 40){
+        mxw <- 40
+    }
+    
+    pdf("${outpref}-zzz0.pdf", width=8.27, heigh=8.27, pointsize=10) 
+    plot(1, type="n", axes=FALSE, frame=FALSE, xlab=NA, ylab=NA)
+    text(1, "Figures for comparison", cex=3, col=2)
+    dev.out <- dev.off() 
+    
+    #### comparison of different peaksets
+    ## promoter <- getPromoters(TxDb=txdb, upstream=${upstream}, downstream=${downstream})
+    ## tagMatrixList <- lapply(bedlist, getTagMatrix, windows=promoter)
+    ## Average profiles
+    plotAvgProf(tagMatrixList, xlim=c(-${upstream}, ${downstream}))
+    ggsave("${outpref}-zzz1-profile-tss.pdf", width=8.27, height=mxh, pointsize=10)
+    # dev.out <- dev.off()
+    
+    ## heatmaps
+    pdf("${outpref}-zzz2-heatmap-tss.pdf", width=mxw, heigh=8.27, pointsize=10)
+    tagHeatmap(tagMatrixList, xlim=c(-${upstream}, ${downstream}), color=NULL)
+    dev.out <- dev.off()
+    
+    ## Distribution of binding sites 
+    ## peakAnnoList <- lapply(bedlist, annotatePeak, TxDb=txdb, tssRegion=c(-${upstream}, ${downstream}), verbose=FALSE)
+    plotAnnoBar(peakAnnoList)
+    ggsave("${outpref}-zzz3-anno-bar.pdf", width=8.27, height=mxh, pointsize=10)
+    # dev.out <- dev.off()
+    
+    plotDistToTSS(peakAnnoList)
+    ggsave("${outpref}-zzz4-dist-tss.pdf", width=8.27, height=mxh, pointsize=10)
+    # dev.out <- dev.off()
+    
+}
+sink()
+EOS
+        
+        gs -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile=${outpref}.figures.pdf ${outpref}-*.pdf && mv ${outpref}-*.pdf ${outpref}-figs || perr "Failed to merge pdf using gs. You can use your favorarite pdf merge tool to merge files '${outpref}-*.pdf' ..."
+        
+        rm -rf ${outpref}
+    else
+        pwarn "Skipping ${sample}. Output file ${outpref}.figures.pdf exists" 
+    fi
+done < "${LIST:-/dev/stdin}" 
+
+## Reference: http://bioconductor.org/packages/release/bioc/html/ChIPseeker.html  
