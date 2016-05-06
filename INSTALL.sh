@@ -18,11 +18,13 @@ cd $BINDIR
 set -x
 cd $BINDIR
 echo "Installing picard ..."
+rm -rf picard
 wget -q https://github.com/broadinstitute/picard/releases/download/2.2.1/picard-tools-2.2.1.zip -O picard-tools-2.2.1.zip 
 unzip -o picard-tools-2.2.1.zip && mv picard-tools-2.2.1 picard && rm picard-tools-2.2.1.zip
 set +x
 
 
+echo "Installing Fastx-Toolkit ..."
 ## Fastx-Toolkit (root?)
 set -x
 cd $BINDIR
@@ -39,6 +41,15 @@ tar -xjf fastx_toolkit-0.0.14.tar.bz2 && cd fastx_toolkit-0.0.14
 ./configure --prefix=$BINDIR/Fastx && make && make install
 set +x
 rm -rf $BINDIR/fastx_toolkit-0.0.14* 
+
+echo "Installing bowtie2 ..."
+set -x
+cd $BINDIR
+wget -q https://sourceforge.net/projects/bowtie-bio/files/bowtie2/2.2.8/bowtie2-2.2.8-linux-x86_64.zip/download -O bowtie2-2.2.8-linux-x86_64.zip
+unzip -o bowtie2-2.2.8-linux-x86_64.zip
+mv bowtie2-2.2.8/* $BINDIR
+set +x
+rm -rf $BINDIR/bowtie2-2.2.8* 
 
 ## samtools 
 echo "Checking samtools installation ..." 
@@ -77,7 +88,9 @@ echo "Installing UCSC toolkits ..."
 ## choose x86_64 platform here 
 wget -q http://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/bedGraphToBigWig -O bedGraphToBigWig 
 wget -q http://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/bedToBigBed -O bedToBigBed 
-chmod +x bedGraphToBigWig bedToBigBed 
+wget -q http://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bedClip -O bedClip 
+wget -q http://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bedSort -O bedSort 
+chmod +x bedGraphToBigWig bedToBigBed bedClip bedSort
 set +x
 
 ## IDR 
@@ -88,14 +101,6 @@ wget -q https://sites.google.com/site/anshulkundaje/projects/idr/idrCode.tar.gz?
 tar -xzf idrCode.tar.gz && rm idrCode.tar.gz
 set +x
 
-
-## phantompeakqualtools 
-set -x
-cd $BINDIR
-echo "Installing phantompeakqualtools ..." 
-wget -q https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/phantompeakqualtools/ccQualityControl.v.1.1.tar.gz -O ccQualityControl.v.1.1.tar.gz
-tar -xzf ccQualityControl.v.1.1.tar.gz && rm ccQualityControl.v.1.1.tar.gz
-set +x
 
 ## MACS2
 echo "Checking MACS2 installation ..." 
@@ -108,6 +113,27 @@ else
     set +x
 fi 
 
+## phantompeakqualtools dependence: snow + caTools
+echo "Checking phantompeakqualtools dependence ..." 
+Rscript - <<EOS
+    getwd()
+    if(!suppressMessages(require(snow,quietly=T,warn.conflicts=F))) {
+        install.packages('snow',dependencies=TRUE)
+    }
+    if(!suppressMessages(require(caTools,quietly=T,warn.conflicts=F))) {
+        install.packages('caTools',dependencies=TRUE)
+    }
+EOS
+
+## phantompeakqualtools 
+set -x
+cd $BINDIR
+echo "Installing phantompeakqualtools ..." 
+wget -q https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/phantompeakqualtools/ccQualityControl.v.1.1.tar.gz -O ccQualityControl.v.1.1.tar.gz
+tar -xzf ccQualityControl.v.1.1.tar.gz && rm ccQualityControl.v.1.1.tar.gz 
+cd phantompeakqualtools && R CMD INSTALL spp_1.10.1.tar.gz 
+set +x
+
 ## BiocParallel
 echo "Checking BiocParallel installation ..." 
 Rscript - <<EOS
@@ -115,7 +141,6 @@ Rscript - <<EOS
     if(!suppressMessages(require(BiocParallel,quietly=T,warn.conflicts=F))) {
         source("http://bioconductor.org/biocLite.R")
         biocLite("BiocParallel", ask=FALSE)
-        library(BiocParallel)
     }
 EOS
 
@@ -126,6 +151,5 @@ Rscript - <<EOS
     if(!suppressMessages(require(ChIPseeker,quietly=T,warn.conflicts=F))) {
         source("http://bioconductor.org/biocLite.R")
         biocLite("ChIPseeker", ask=FALSE)
-        library(ChIPseeker)
     }
 EOS
