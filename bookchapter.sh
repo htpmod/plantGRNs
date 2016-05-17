@@ -369,6 +369,7 @@ cut -f 1 $myWorkDIR/meta/macs2.meta | uniq | while read TF; do
 ## Rscript batch-consistency-plot.r 1 $myWorkDIR/macs2/idr/SVP_repAll $myWorkDIR/macs2/idr/SVP_rep1_VS_SVP_rep3
 # 
 mkdir -p $myWorkDIR/macs2/idr && cd $myWorkDIR/bin/idrCode/ 
+cp $myWorkDIR/macs2/chrom.sizes genome_table.txt 
 pDIR=$myWorkDIR/macs2
 # 1. Run IDR analysis on original replicates: 
 awk -vFS="\t" -vOFS="\t" '{a[$1]=a[$1]?a[$1]"\t"$2:$2;} \
