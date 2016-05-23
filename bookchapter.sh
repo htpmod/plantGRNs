@@ -166,7 +166,8 @@ awk '(!/_control/){print $2, $3}' $myWorkDIR/meta/chip-seq.txt \
 cd $myWorkDIR/align
 awk -vFS="\t" -vOFS="\t" '{bam=$3".final.bam"; \
     if(($2~/_control/)){c=$1"_control"}else{c=$1"_rep0"} \
-        a[c]=a[c]?a[c]";"bam:bam} END{for(i in a){print i,a[i]}}' \
+        if(!f[c][bam]){a[c]=a[c]?a[c]";"bam:bam} f[c][bam]++} \
+        END{for(i in a){print i,a[i]}}' \
     $myWorkDIR/meta/chip-seq.txt \
     | while read TF bams; do 
         out=$TF".bam"
@@ -258,7 +259,7 @@ cat $myWorkDIR/meta/macs2.meta | while read TF Rep Trmt Ctrl; do
         awk -vOFS="\t" '(/^@SQ/){match($0,/SN:(\w+)/,SN); \
             match($0,/LN:([0-9]+)/,LN);print SN[1],LN[1]}' \
             > chrom.sizes 
-        GS=$(awk '{GS+=$2}END{print GS}' chrom.sizes)
+        GS=$(awk '{GS+=$2}END{print int(0.85*GS)}' chrom.sizes)
         [[ ! -f ${OUT}.peaks.bed ]] && \
         echo "macs2 callpeak -f BAM -t $ChIP -c $Ctrl -n ${OUT} \
             -g $GS -p 1e-2 --mfold 2 20 --to-large; \
@@ -286,7 +287,7 @@ cat $myWorkDIR/meta/macs2.meta | while read TF Rep Trmt Ctrl; do
             awk -vOFS="\t" '(/^@SQ/){match($0,/SN:(\w+)/,SN); \
                 match($0,/LN:([0-9]+)/,LN);print SN[1],LN[1]}' \
                 > chrom.sizes 
-            GS=$(awk '{GS+=$2}END{print GS}' chrom.sizes)
+            GS=$(awk '{GS+=$2}END{print int(0.85*GS)}' chrom.sizes)
             [[ ! -f ${OUT}.peaks.bed ]] && \
             echo "macs2 callpeak -f BAM -t $ChIP -c $Ctrl -n ${OUT} \
                 -g $GS -p 1e-2 --mfold 2 20 --to-large; \
@@ -306,7 +307,7 @@ cut -f 1 $myWorkDIR/meta/macs2.meta | uniq | while read TF; do
             awk -vOFS="\t" '(/^@SQ/){match($0,/SN:(\w+)/,SN); \
                 match($0,/LN:([0-9]+)/,LN);print SN[1],LN[1]}' \
                 > chrom.sizes 
-            GS=$(awk '{GS+=$2}END{print GS}' chrom.sizes)
+            GS=$(awk '{GS+=$2}END{print int(0.85*GS)}' chrom.sizes)
             [[ ! -f ${OUT}.peaks.bed ]] && \
             echo "macs2 callpeak -f BAM -t $ChIP -c $Ctrl -n ${OUT} \
                 -g $GS -p 1e-2 --mfold 2 20 --to-large; \
@@ -332,8 +333,8 @@ cut -f 1 $myWorkDIR/meta/macs2.meta | uniq | while read TF; do
             END{print TL/10e+6}')
         SF=$(echo "$cSF $tSF" | awk '($1>$2){print $2} \
             ($1<=$2){print $1}')
-        GS=$(awk '{GS+=$2}END{print GS}' chrom.sizes)
-        [[ ! -f signal/${OUT}.peaks.bb ]] && \
+        GS=$(awk '{GS+=$2}END{print int(0.85*GS)}' chrom.sizes)
+        [[ ! -f ${OUT}.peaks.bed ]] && \
         echo "macs2 callpeak -f BAM -t $ChIP -c $Ctrl -n ${OUT} \
             -g $GS -p 1e-2 --mfold 2 20 -B --SPMR --to-large; \
             maxS=\$(sort -k 5gr,5gr ${OUT}_peaks.narrowPeak \
@@ -510,7 +511,7 @@ dev.off()
 
 # **************** 14. Target genes **************** 
 cat *.target.list | tee target.list | awk -vFS="\t" 'BEGIN{ \
-    while(getline<"TF.txt"){a[$1]++}}(a[$2])' > TFtarget.list
+    while(getline<"../meta/TF.txt"){a[$1]++}}(a[$2])' > TFtarget.list
 
 # R code 
 R 
@@ -557,6 +558,16 @@ mkgs <- list(grep("AP1_day", vertices), grep("SEP3_day", vertices))
 pdf("Fig. 5.pdf", width=8.27, heigh=8.27, pointsize=10)
 set.seed(1234)
 plot(net, layout=layout.auto, mark.groups=mkgs, mark.col=c("#36a9e0","#36a9e0"), mark.border=NA, edge.arrow.size=.8, vertex.label.font=3)
+set.seed(1234)
+plot(net, layout=layout.auto, mark.groups=mkgs, mark.col=c("#36a9e0","#f9b233"), mark.border=NA, edge.arrow.size=.8, vertex.label.font=3)
+set.seed(1234)
+plot(net, layout=layout.kamada.kawai, mark.groups=mkgs, mark.col=c("#36a9e0","#f9b233"), mark.border=NA, edge.arrow.size=.8, vertex.label.font=3)
+set.seed(1234)
+plot(net, layout=layout.fruchterman.reingold, mark.groups=mkgs, mark.col=c("#36a9e0","#f9b233"), mark.border=NA, edge.arrow.size=.8, vertex.label.font=3)
+set.seed(1234)
+plot(net, layout=layout.fruchterman.reingold, mark.groups=mkgs, mark.col=c("#36a9e0","#f9b233"), mark.border=NA, edge.arrow.size=.8, vertex.label.font=3)
+set.seed(1234)
+plot(net, layout=layout.drl, mark.groups=mkgs, mark.col=c("#36a9e0","#f9b233"), mark.border=NA, edge.arrow.size=.8, vertex.label.font=3)
 dev.off()
 
 
